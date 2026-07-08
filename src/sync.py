@@ -20,6 +20,7 @@ def sync_all(
     config: AppConfig,
     db_path: str,
     folder_ids: list[int] | None = None,
+    limit: int | None = None,
 ) -> dict:
     """执行全量元数据同步（收藏夹 + 稍后再看）。
 
@@ -28,12 +29,19 @@ def sync_all(
         config: AppConfig 实例
         db_path: 数据库路径
         folder_ids: 指定同步的收藏夹 ID 列表，None 表示同步全部
+        limit: 最多同步条数（None = 全部），用于测试
 
     Returns:
         {total_new, total_updated, favorites: {folder_name: {new, updated}}, watch_later: {new, updated}}
     """
     uid = config.bilibili.uid
     stats = {"total_new": 0, "total_updated": 0, "favorites": {}, "watch_later": {}}
+
+    def _total() -> int:
+        return stats["total_new"] + stats["total_updated"]
+
+    def _at_limit() -> bool:
+        return limit is not None and _total() >= limit
 
     # 1. 同步收藏夹
     logger.info("=" * 50)
@@ -46,13 +54,18 @@ def sync_all(
             logger.warning(f"未找到指定的收藏夹 ID: {folder_ids}")
 
     for folder in folders:
+        if _at_limit():
+            logger.info(f"已达到 limit {limit}，停止同步")
+            break
+
         media_id = folder.get("id", 0)
         folder_name = folder.get("title", f"收藏夹_{media_id}")
         logger.info(f"\n--- 收藏夹: {folder_name} (mlid={media_id}) ---")
 
         new = 0
         updated = 0
-        for video in iter_folder_videos(client, media_id):
+        remaining = limit - _total() if limit is not None else None
+        for video in iter_folder_videos(client, media_id, limit=remaining):
             result = _upsert_favorite_video(db_path, video, media_id, folder_name)
             if result == "new":
                 new += 1
@@ -65,21 +78,23 @@ def sync_all(
         logger.info(f"  新增: {new}, 更新: {updated}")
 
     # 2. 同步稍后再看
-    logger.info("\n" + "=" * 50)
-    logger.info("开始同步稍后再看...")
-    wl_new = 0
-    wl_updated = 0
-    for video in iter_watch_later(client):
-        result = _upsert_watch_later_video(db_path, video)
-        if result == "new":
-            wl_new += 1
-        else:
-            wl_updated += 1
+    if not _at_limit():
+        logger.info("\n" + "=" * 50)
+        logger.info("开始同步稍后再看...")
+        wl_new = 0
+        wl_updated = 0
+        remaining = limit - _total() if limit is not None else None
+        for video in iter_watch_later(client, limit=remaining):
+            result = _upsert_watch_later_video(db_path, video)
+            if result == "new":
+                wl_new += 1
+            else:
+                wl_updated += 1
 
-    stats["watch_later"] = {"new": wl_new, "updated": wl_updated}
-    stats["total_new"] += wl_new
-    stats["total_updated"] += wl_updated
-    logger.info(f"  新增: {wl_new}, 更新: {wl_updated}")
+        stats["watch_later"] = {"new": wl_new, "updated": wl_updated}
+        stats["total_new"] += wl_new
+        stats["total_updated"] += wl_updated
+        logger.info(f"  新增: {wl_new}, 更新: {wl_updated}")
 
     logger.info("\n" + "=" * 50)
     logger.info(f"同步完成: 共新增 {stats['total_new']} 个视频, 更新 {stats['total_updated']} 个")

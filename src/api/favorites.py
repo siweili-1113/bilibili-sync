@@ -60,18 +60,20 @@ def get_folder_videos(
 
 
 def iter_folder_videos(
-    client: BilibiliClient, media_id: int
+    client: BilibiliClient, media_id: int, limit: int | None = None
 ):
     """迭代收藏夹内全部视频（自动翻页）。
 
     Args:
         client: BilibiliClient 实例
         media_id: 收藏夹 mlid
+        limit: 最多获取条数（None = 全部）
 
     Yields:
         视频信息字典（单条 medias 元素）
     """
     page = 1
+    fetched = 0
     while True:
         result = get_folder_videos(client, media_id, page=page)
         medias = result["medias"]
@@ -79,6 +81,9 @@ def iter_folder_videos(
             break
         for media in medias:
             yield media
+            fetched += 1
+            if limit is not None and fetched >= limit:
+                return
         if not result["has_more"]:
             break
         page += 1

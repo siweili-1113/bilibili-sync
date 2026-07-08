@@ -37,7 +37,8 @@ def cmd_sync(args: argparse.Namespace, config: AppConfig) -> None:
     )
 
     folder_ids = args.folders or config.sync.favorite_folder_ids or None
-    sync_all(client, config, config.database.path, folder_ids=folder_ids)
+    limit = getattr(args, "limit", None)
+    sync_all(client, config, config.database.path, folder_ids=folder_ids, limit=limit)
 
 
 def cmd_process(args: argparse.Namespace, config: AppConfig) -> None:
@@ -131,13 +132,16 @@ def cmd_run(args: argparse.Namespace, config: AppConfig) -> None:
     logger.info("=" * 60)
     logger.info("B站收藏夹/稍后再看 → 文字归档工具")
     logger.info("=" * 60)
+    limit = getattr(args, "limit", None)
+    if limit:
+        logger.info(f"测试模式：最多处理 {limit} 条")
 
     # 阶段0: 同步元数据
     logger.info("\n>>> 阶段0: 同步元数据")
     cmd_sync(args, config)
 
-    # 阶段1: 字幕下载
-    logger.info("\n>>> 阶段1: 字幕下载")
+    # 阶段1: 字幕下载 + LLM
+    logger.info("\n>>> 阶段1: 字幕下载 + LLM处理")
     cmd_process(args, config)
 
     # 阶段5: 导出
@@ -211,6 +215,12 @@ def main() -> None:
         nargs="+",
         help="指定收藏夹 mlid（不指定则同步全部）",
     )
+    sync_parser.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        help="最多同步条数（用于测试，默认全部）",
+    )
 
     # process
     process_parser = subparsers.add_parser("process", help="下载字幕 + LLM 处理（阶段1+3+4）")
@@ -240,6 +250,12 @@ def main() -> None:
         type=int,
         nargs="+",
         help="指定收藏夹 mlid",
+    )
+    run_parser.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        help="最多处理条数（用于测试，默认全部）",
     )
 
     # status
