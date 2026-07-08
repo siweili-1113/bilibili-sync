@@ -1,0 +1,28 @@
+[project]
+name = "bilibili-sync"
+version = "0.1.0"
+description = "B站收藏夹/稍后再看 转文字归档工具"
+requires-python = ">=3.11"
+dependencies = [
+    "requests>=2.31.0",
+    "pyyaml>=6.0",
+    "python-dotenv>=1.0.0",
+    "openai>=1.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-mock>=3.12",
+    "ruff>=0.1.0",
+]
+
+[project.scripts]
+bilibili-sync = "src.main:main"
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]

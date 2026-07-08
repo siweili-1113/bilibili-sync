@@ -1,0 +1,49 @@
+# B站配置
+bilibili:
+  sessdata: ""                  # 优先从 BILIBILI_SESSDATA 环境变量读取
+  user_agent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+
+# LLM 配置（OpenAI 兼容接口）
+llm:
+  provider: "openai_compatible"
+  api_key: ""                   # 优先从 LLM_API_KEY 环境变量读取
+  base_url: "https://api.openai.com/v1"
+  model: "gpt-4o-mini"
+  max_tokens: 4096
+  temperature: 0.3
+  # 文本整理 prompt
+  cleaning_system_prompt: |
+    你是一个专业的中文文字编辑。请对以下视频字幕/语音转录文本进行整理：
+    1. 添加正确的标点符号（。，！？、等）
+    2. 删除无意义的语气词和重复（呃、嗯、那个、就是说、然后然后等）
+    3. 根据语义将文本合理分段，段落之间用空行分隔
+    4. 修正明显的错别字和语法错误
+    5. 保持原文的完整含义，不要添加原文没有的内容，也不要删减实质内容
+    请直接输出整理后的文本，不要包含任何说明文字。
+  # 内容摘要 prompt
+  summary_system_prompt: |
+    请用中文对以下视频内容生成一个简洁的摘要。要求：
+    - 列出3-5个核心要点
+    - 每个要点以"- "开头，不超过50字
+    - 如果视频内容有明显的结论或观点，单独列出
+    请直接输出摘要，不要包含任何说明文字。
+
+# 输出配置
+output:
+  base_dir: "./output"
+
+# 同步配置
+sync:
+  favorite_folder_ids: []       # 空列表 = 同步所有收藏夹；可指定 folder mlid
+  rate_limit_min: 1.0           # 接口最小间隔（秒）
+  rate_limit_max: 3.0           # 接口最大间隔（秒）
+  max_retries: 3                # 最大重试次数
+
+# 数据库
+database:
+  path: "./bilibili_sync.db"
+
+# 日志
+logging:
+  level: "INFO"
+  file: ""                      # 空字符串 = 只输出到控制台
