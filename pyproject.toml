@@ -2,7 +2,7 @@
 name = "bilibili-sync"
 version = "0.1.0"
 description = "B站收藏夹/稍后再看 转文字归档工具"
-requires-python = ">=3.11"
+requires-python = ">=3.10"
 dependencies = [
     "requests>=2.31.0",
     "pyyaml>=6.0",
