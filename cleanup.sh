@@ -12,9 +12,9 @@ echo ">>> 卸载 pip 包..."
 pip3 uninstall -y yt-dlp faster-whisper ctranslate2 onnxruntime huggingface-hub tokenizers av 2>/dev/null || python3.11 -m pip uninstall --break-system-packages -y yt-dlp faster-whisper ctranslate2 onnxruntime huggingface-hub tokenizers av 2>/dev/null
 echo "  完成"
 
-# 2. 删除 Whisper 模型
-echo ">>> 删除 Whisper 模型..."
-rm -rf ~/.cache/huggingface/hub/models--Systran--faster-whisper-small/
+# 2. 删除 Whisper 模型和 HF 缓存
+echo ">>> 删除 HuggingFace 缓存..."
+rm -rf ~/.cache/huggingface/
 echo "  完成"
 
 # 3. 删除临时音频文件（如果有残留）
