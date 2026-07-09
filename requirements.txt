@@ -1,0 +1,8 @@
+# B站同步工具 - 依赖清单
+# 安装: pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
+
+requests>=2.31.0
+pyyaml>=6.0
+python-dotenv>=1.0.0
+openai>=1.0.0
+faster-whisper>=1.0

@@ -23,5 +23,10 @@ venv/
 # 日志
 *.log
 
+# 临时音频文件（正常情况下不会残留）
+bilibili_asr_*.m4s
+bilibili_asr_*.mp3
+bilibili_cookie_*.txt
+
 # macOS
 .DS_Store
