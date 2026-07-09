@@ -115,6 +115,11 @@ def process_llm(config: AppConfig) -> None:
                 summary=summary,
             )
             logger.info(f"  ✓ 完成")
+
+            # 请求间缓冲，避免 API 波动
+            import time
+            time.sleep(0.5)
+
         except KeyboardInterrupt:
             logger.info("\n用户中断，进度已保存")
             raise
