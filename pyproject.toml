@@ -8,6 +8,8 @@ dependencies = [
     "pyyaml>=6.0",
     "python-dotenv>=1.0.0",
     "openai>=1.0.0",
+    "yt-dlp>=2024.0",
+    "faster-whisper>=1.0",
 ]
 
 [project.optional-dependencies]

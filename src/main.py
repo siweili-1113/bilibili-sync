@@ -18,7 +18,7 @@ from src.config import AppConfig, load_config
 from src.database import get_stats, init_db, reset_error_videos
 from src.exporter import export_all
 from src.llm import LLMProcessor
-from src.processor import process_pending_videos, process_video
+from src.processor import process_pending_videos
 from src.sync import sync_all
 from src.utils import setup_logging
 
@@ -38,7 +38,8 @@ def cmd_sync(args: argparse.Namespace, config: AppConfig) -> None:
 
     folder_ids = args.folders or config.sync.favorite_folder_ids or None
     limit = getattr(args, "limit", None)
-    sync_all(client, config, config.database.path, folder_ids=folder_ids, limit=limit)
+    source = getattr(args, "source", "all")
+    sync_all(client, config, config.database.path, folder_ids=folder_ids, limit=limit, source=source)
 
 
 def cmd_process(args: argparse.Namespace, config: AppConfig) -> None:
@@ -60,7 +61,7 @@ def cmd_process(args: argparse.Namespace, config: AppConfig) -> None:
     else:
         logger.info("=" * 50)
         logger.info("阶段1: 字幕下载")
-        process_pending_videos(client, config.database.path, max_retries=max_retries)
+        process_pending_videos(config, config.database.path, max_retries=max_retries)
 
     # Phase 3+4: LLM 处理
     if args.skip_llm:
@@ -99,6 +100,13 @@ def process_llm(config: AppConfig) -> None:
 
         try:
             cleaned, summary = llm.process(raw_text)
+
+            # LLM 返回空内容时回退到原始 ASR 文本
+            if not cleaned or not cleaned.strip():
+                logger.warning(f"  LLM 返回空内容，回退到原始 ASR 文本")
+                cleaned = raw_text
+                summary = "(LLM 处理失败，以下为原始语音转录文本)"
+
             update_video_status(
                 config.database.path,
                 bvid,
@@ -221,6 +229,12 @@ def main() -> None:
         default=None,
         help="最多同步条数（用于测试，默认全部）",
     )
+    sync_parser.add_argument(
+        "--source",
+        choices=["all", "favorites", "watch_later"],
+        default="all",
+        help="同步来源（默认: all）",
+    )
 
     # process
     process_parser = subparsers.add_parser("process", help="下载字幕 + LLM 处理（阶段1+3+4）")
@@ -256,6 +270,12 @@ def main() -> None:
         type=int,
         default=None,
         help="最多处理条数（用于测试，默认全部）",
+    )
+    run_parser.add_argument(
+        "--source",
+        choices=["all", "favorites", "watch_later"],
+        default="all",
+        help="同步来源（默认: all）",
     )
 
     # status

@@ -21,6 +21,7 @@ def sync_all(
     db_path: str,
     folder_ids: list[int] | None = None,
     limit: int | None = None,
+    source: str = "all",
 ) -> dict:
     """执行全量元数据同步（收藏夹 + 稍后再看）。
 
@@ -30,6 +31,7 @@ def sync_all(
         db_path: 数据库路径
         folder_ids: 指定同步的收藏夹 ID 列表，None 表示同步全部
         limit: 最多同步条数（None = 全部），用于测试
+        source: 同步来源 — "all" / "favorites" / "watch_later"
 
     Returns:
         {total_new, total_updated, favorites: {folder_name: {new, updated}}, watch_later: {new, updated}}
@@ -44,41 +46,42 @@ def sync_all(
         return limit is not None and _total() >= limit
 
     # 1. 同步收藏夹
-    logger.info("=" * 50)
-    logger.info("开始同步收藏夹...")
-    folders = get_favorite_folders(client, uid)
+    if source in ("all", "favorites"):
+        logger.info("=" * 50)
+        logger.info("开始同步收藏夹...")
+        folders = get_favorite_folders(client, uid)
 
-    if folder_ids:
-        folders = [f for f in folders if f.get("id") in folder_ids]
-        if not folders:
-            logger.warning(f"未找到指定的收藏夹 ID: {folder_ids}")
+        if folder_ids:
+            folders = [f for f in folders if f.get("id") in folder_ids]
+            if not folders:
+                logger.warning(f"未找到指定的收藏夹 ID: {folder_ids}")
 
-    for folder in folders:
-        if _at_limit():
-            logger.info(f"已达到 limit {limit}，停止同步")
-            break
+        for folder in folders:
+            if _at_limit():
+                logger.info(f"已达到 limit {limit}，停止同步")
+                break
 
-        media_id = folder.get("id", 0)
-        folder_name = folder.get("title", f"收藏夹_{media_id}")
-        logger.info(f"\n--- 收藏夹: {folder_name} (mlid={media_id}) ---")
+            media_id = folder.get("id", 0)
+            folder_name = folder.get("title", f"收藏夹_{media_id}")
+            logger.info(f"\n--- 收藏夹: {folder_name} (mlid={media_id}) ---")
 
-        new = 0
-        updated = 0
-        remaining = limit - _total() if limit is not None else None
-        for video in iter_folder_videos(client, media_id, limit=remaining):
-            result = _upsert_favorite_video(db_path, video, media_id, folder_name)
-            if result == "new":
-                new += 1
-            else:
-                updated += 1
+            new = 0
+            updated = 0
+            remaining = limit - _total() if limit is not None else None
+            for video in iter_folder_videos(client, media_id, limit=remaining):
+                result = _upsert_favorite_video(db_path, video, media_id, folder_name)
+                if result == "new":
+                    new += 1
+                else:
+                    updated += 1
 
-        stats["favorites"][folder_name] = {"new": new, "updated": updated}
-        stats["total_new"] += new
-        stats["total_updated"] += updated
-        logger.info(f"  新增: {new}, 更新: {updated}")
+            stats["favorites"][folder_name] = {"new": new, "updated": updated}
+            stats["total_new"] += new
+            stats["total_updated"] += updated
+            logger.info(f"  新增: {new}, 更新: {updated}")
 
     # 2. 同步稍后再看
-    if not _at_limit():
+    if source in ("all", "watch_later") and not _at_limit():
         logger.info("\n" + "=" * 50)
         logger.info("开始同步稍后再看...")
         wl_new = 0
