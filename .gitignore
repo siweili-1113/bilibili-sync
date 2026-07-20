@@ -30,3 +30,5 @@ bilibili_cookie_*.txt
 
 # macOS
 .DS_Store
+*.db-shm
+*.db-wal
