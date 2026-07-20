@@ -260,26 +260,35 @@ def cmd_run(args: argparse.Namespace, config: AppConfig) -> None:
             summary=summary,
         )
 
-        # 用户决定
+        # 展示原始转录 vs 整理后（前 200 字对比）
         print()
+        if raw_text and cleaned:
+            print(f"  📝 原始转录 ({len(raw_text)}字): {raw_text[:150]}...")
+            print(f"  ✨ 整理后   ({len(cleaned)}字): {cleaned[:150]}...")
+        print()
+
+        # 用户决定
         parts = []
         if has_csrf and folder_mlid and aid:
-            parts.append("[k] 保留笔记+移入收藏+删稍后再看")
-            parts.append("[d] 删稍后再看(不留笔记)")
-        parts.append("[s] 跳过，俩都不动")
+            parts.append("[k] 保存+收藏+删稍后再看")
+        if has_csrf and aid:
+            parts.append("[d] 保存+删稍后再看(不收藏)")
+        parts.append("[s] 跳过")
         if not has_csrf:
-            parts.append("(没有 CSRF，B站操作不可用)")
+            parts.append("(无 CSRF，B站操作不可用)")
 
         print("  " + "\n  ".join(parts))
         print()
 
         valid_actions = set()
         if has_csrf and folder_mlid and aid:
-            valid_actions.update(["k", "d"])
+            valid_actions.add("k")
+        if has_csrf and aid:
+            valid_actions.add("d")
         valid_actions.update(["s", "n", "q"])
 
         while True:
-            choice = input("  选 [k/d/s] 或 [n]退出 [q]立刻退出 > ").strip().lower()
+            choice = input("  [k/d/s] 或 [n]退出 [q]立刻退出 > ").strip().lower()
             if choice in valid_actions:
                 break
             print("  无效输入，可选: " + "/".join(sorted(valid_actions)))
@@ -288,23 +297,25 @@ def cmd_run(args: argparse.Namespace, config: AppConfig) -> None:
             logger.info("立刻退出，当前视频未保存。下次运行重新转录。")
             break
 
-        # 执行操作（k/d/s）
+        # k 和 d 都导出 md
+        if choice in ("k", "d"):
+            from src.exporter import export_video
+            fresh = conn.execute("SELECT * FROM videos WHERE bvid=?", (bvid,)).fetchone()
+            if fresh:
+                export_video(dict(fresh), config.output.base_dir)
+
         if choice in ("k", "d", "s"):
             if choice == "k":
-                from src.exporter import export_video
-                fresh = conn.execute("SELECT * FROM videos WHERE bvid=?", (bvid,)).fetchone()
-                if fresh:
-                    export_video(dict(fresh), config.output.base_dir)
                 update_video_status(config.database.path, bvid, "markdown_generated")
                 add_to_favorites(config, aid, folder_mlid)
                 remove_from_watch_later(config, aid)
                 print("  ✅ 笔记已保存 + 收藏 + 删稍后再看")
             elif choice == "d":
-                remove_from_watch_later(config, aid)
                 update_video_status(config.database.path, bvid, "markdown_generated")
-                print("  ✅ 已删稍后再看(不留笔记)")
+                remove_from_watch_later(config, aid)
+                print("  ✅ 笔记已保存 + 删稍后再看")
             elif choice == "s":
-                print("  ⏭️ 跳过，B站和笔记都不动")
+                print("  ⏭️ 跳过")
 
         if choice == "n":
             logger.info("处理完毕，退出。")
@@ -346,39 +357,46 @@ def _interactive_review(config, videos, folder_mlid, has_csrf):
         print()
         parts = []
         if has_csrf and folder_mlid and aid:
-            parts.append("[k] 保留笔记+移入收藏+删稍后再看")
-            parts.append("[d] 删稍后再看(不留笔记)")
+            parts.append("[k] 保存+收藏+删稍后再看")
+        if has_csrf and aid:
+            parts.append("[d] 保存+删稍后再看(不收藏)")
         parts.append("[s] 跳过")
         print("  " + "\n  ".join(parts))
 
         valid_actions = set()
         if has_csrf and folder_mlid and aid:
-            valid_actions.update(["k", "d"])
+            valid_actions.add("k")
+        if has_csrf and aid:
+            valid_actions.add("d")
         valid_actions.update(["s", "n", "q"])
 
         while True:
-            choice = input("\n  选 [k/d/s] 或 [n]退出 [q]立刻退出 > ").strip().lower()
+            choice = input("\n  [k/d/s] 或 [n]退出 [q]立刻退出 > ").strip().lower()
             if choice in valid_actions:
                 break
             print("  无效输入")
 
         if choice == "q":
             break
-        elif choice == "k":
+
+        # k 和 d 都导出 md
+        if choice in ("k", "d"):
             from src.exporter import export_video
             fresh = conn.execute("SELECT * FROM videos WHERE bvid=?", (bvid,)).fetchone()
             if fresh:
                 export_video(dict(fresh), config.output.base_dir)
+
+        if choice == "k":
             update_video_status(config.database.path, bvid, "markdown_generated")
             if has_csrf:
                 add_to_favorites(config, aid, folder_mlid)
                 remove_from_watch_later(config, aid)
             print("  ✅ 笔记已保存 + 收藏 + 删稍后再看")
         elif choice == "d":
+            update_video_status(config.database.path, bvid, "markdown_generated")
             if has_csrf:
                 remove_from_watch_later(config, aid)
-            update_video_status(config.database.path, bvid, "markdown_generated")
-            print("  ✅ 已删稍后再看(不留笔记)")
+            print("  ✅ 笔记已保存 + 删稍后再看")
         elif choice == "s":
             print("  ⏭️ 跳过")
 
