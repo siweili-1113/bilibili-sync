@@ -262,51 +262,52 @@ def cmd_run(args: argparse.Namespace, config: AppConfig) -> None:
 
         # 用户决定
         print()
-        actions = []
+        parts = []
         if has_csrf and folder_mlid and aid:
-            actions.append(("k", "保留+收藏+删稍后再看"))
-        if has_csrf and aid:
-            actions.append(("d", "从稍后再看删除"))
-        actions.append(("s", "跳过"))
-
-        prompt_parts = [f"[{k}] {desc}" for k, desc in actions]
-        prompt_parts.append("[n] 处理完退出")
-        prompt_parts.append("[q] 立刻退出")
-        prompt = "  " + "    ".join(prompt_parts)
+            parts.append("[k] 保留笔记+移入收藏+删稍后再看")
+            parts.append("[d] 删稍后再看(不留笔记)")
+        parts.append("[s] 跳过，俩都不动")
         if not has_csrf:
-            prompt += "\n  (未配置 CSRF，无法操作 B站。编辑 .env 添加 BILIBILI_CSRF=bili_jct)"
+            parts.append("(没有 CSRF，B站操作不可用)")
 
-        valid_keys = {k for k, _ in actions} | {"n", "q"}
+        print("  " + "\n  ".join(parts))
+        print()
+
+        valid_actions = set()
+        if has_csrf and folder_mlid and aid:
+            valid_actions.update(["k", "d"])
+        valid_actions.update(["s", "n", "q"])
 
         while True:
-            choice = input(f"{prompt}\n  > ").strip().lower()
-            if choice in valid_keys:
+            choice = input("  选 [k/d/s] 或 [n]退出 [q]立刻退出 > ").strip().lower()
+            if choice in valid_actions:
                 break
-            print("  无效输入")
+            print("  无效输入，可选: " + "/".join(sorted(valid_actions)))
 
         if choice == "q":
-            logger.info("立刻退出，当前视频未处理。下次运行重新转录。")
+            logger.info("立刻退出，当前视频未保存。下次运行重新转录。")
             break
 
-        if choice == "k":
-            from src.exporter import export_video
-            # 从数据库重新取，确保拿到 LLM 处理后的 cleaned_text 和 summary
-            fresh = conn.execute("SELECT * FROM videos WHERE bvid=?", (bvid,)).fetchone()
-            if fresh:
-                export_video(dict(fresh), config.output.base_dir)
-            update_video_status(config.database.path, bvid, "markdown_generated")
-            add_to_favorites(config, aid, folder_mlid)
-            remove_from_watch_later(config, aid)
-            print("  ✅ 已保存笔记 + 收藏 + 从稍后再看删除")
-        elif choice == "d":
-            remove_from_watch_later(config, aid)
-            update_video_status(config.database.path, bvid, "markdown_generated")
-            print("  ✅ 已从稍后再看删除")
-        elif choice == "s":
-            print("  ⏭️ 已跳过")
+        # 执行操作（k/d/s）
+        if choice in ("k", "d", "s"):
+            if choice == "k":
+                from src.exporter import export_video
+                fresh = conn.execute("SELECT * FROM videos WHERE bvid=?", (bvid,)).fetchone()
+                if fresh:
+                    export_video(dict(fresh), config.output.base_dir)
+                update_video_status(config.database.path, bvid, "markdown_generated")
+                add_to_favorites(config, aid, folder_mlid)
+                remove_from_watch_later(config, aid)
+                print("  ✅ 笔记已保存 + 收藏 + 删稍后再看")
+            elif choice == "d":
+                remove_from_watch_later(config, aid)
+                update_video_status(config.database.path, bvid, "markdown_generated")
+                print("  ✅ 已删稍后再看(不留笔记)")
+            elif choice == "s":
+                print("  ⏭️ 跳过，B站和笔记都不动")
 
         if choice == "n":
-            logger.info("处理完当前视频，退出。下次运行继续处理剩余视频。")
+            logger.info("处理完毕，退出。")
             break
 
         import time
@@ -343,23 +344,23 @@ def _interactive_review(config, videos, folder_mlid, has_csrf):
                     print(f"  {line}")
 
         print()
-        actions = []
+        parts = []
         if has_csrf and folder_mlid and aid:
-            actions.append(("k", "保留+收藏+删稍后再看"))
-        if has_csrf and aid:
-            actions.append(("d", "从稍后再看删除"))
-        actions.append(("s", "跳过"))
+            parts.append("[k] 保留笔记+移入收藏+删稍后再看")
+            parts.append("[d] 删稍后再看(不留笔记)")
+        parts.append("[s] 跳过")
+        print("  " + "\n  ".join(parts))
 
-        prompt_parts = [f"[{k}] {desc}" for k, desc in actions]
-        prompt_parts.append("[n] 处理完退出")
-        prompt_parts.append("[q] 立刻退出")
-        prompt = "  " + "    ".join(prompt_parts)
-        valid_keys = {k for k, _ in actions} | {"n", "q"}
+        valid_actions = set()
+        if has_csrf and folder_mlid and aid:
+            valid_actions.update(["k", "d"])
+        valid_actions.update(["s", "n", "q"])
 
         while True:
-            choice = input(f"{prompt}\n  > ").strip().lower()
-            if choice in valid_keys:
+            choice = input("\n  选 [k/d/s] 或 [n]退出 [q]立刻退出 > ").strip().lower()
+            if choice in valid_actions:
                 break
+            print("  无效输入")
 
         if choice == "q":
             break
@@ -372,12 +373,12 @@ def _interactive_review(config, videos, folder_mlid, has_csrf):
             if has_csrf:
                 add_to_favorites(config, aid, folder_mlid)
                 remove_from_watch_later(config, aid)
-            print("  ✅ 已保存笔记 + 收藏 + 删除")
+            print("  ✅ 笔记已保存 + 收藏 + 删稍后再看")
         elif choice == "d":
             if has_csrf:
                 remove_from_watch_later(config, aid)
             update_video_status(config.database.path, bvid, "markdown_generated")
-            print("  ✅ 已从稍后再看删除")
+            print("  ✅ 已删稍后再看(不留笔记)")
         elif choice == "s":
             print("  ⏭️ 跳过")
 
