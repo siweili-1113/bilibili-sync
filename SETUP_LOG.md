@@ -1,47 +1,21 @@
-# ASR 环境记录
+# 环境记录
 
-## 安装方式
+## 本会话安装内容（2026-07-20）
 
-### 方式一：一键安装（推荐）
-
+### pip 包（清华镜像）
 ```bash
-./setup.sh
+python3.11 -m pip install --break-system-packages \
+  -i https://pypi.tuna.tsinghua.edu.cn/simple \
+  faster-whisper
 ```
 
-### 方式二：手动安装
+连带安装的依赖：ctranslate2, onnxruntime, huggingface-hub, tokenizers, av
 
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -e "." -i https://pypi.tuna.tsinghua.edu.cn/simple
-cp .env.example .env
-nano .env
-```
+### Whisper 模型
+- faster-whisper-small (~500MB) → `~/.cache/huggingface/`
+- 首次运行 ASR 自动下载，使用 HF 镜像
 
-## 依赖包（通过清华镜像安装）
-
-| 包 | 版本 | 用途 |
-|---|---|---|
-| faster-whisper | 1.x | 本地语音转文字（CTranslate2 加速） |
-| ctranslate2 | 4.x | faster-whisper 推理引擎（无需 torch） |
-| openai | 2.x | LLM API 调用 |
-| requests | 2.x | HTTP 请求 |
-| pyyaml | 6.x | 配置文件解析 |
-| python-dotenv | 1.x | 环境变量加载 |
-
-## 下载的模型
-
-- **Whisper small** (~500MB) → `~/.cache/huggingface.co/hub/models--Systran--faster-whisper-small/`
-- 首次运行 ASR 时自动下载，使用 `HF_ENDPOINT=https://hf-mirror.com` 镜像
-- 禁用 Xet 协议（`HF_HUB_DISABLE_XET=1`），强制 HTTP 下载
-
-## HuggingFace 镜像配置
-
-```bash
-export HF_ENDPOINT=https://hf-mirror.com
-export HF_HUB_ENABLE_HF_TRANSFER=0   # 禁用 Xet 加速（镜像不支持）
-export HF_HUB_DISABLE_XET=1          # 强制使用 HTTP 下载
-```
+---
 
 ## 清理
 
@@ -49,4 +23,27 @@ export HF_HUB_DISABLE_XET=1          # 强制使用 HTTP 下载
 ./cleanup.sh
 ```
 
-卸载 faster-whisper 及相关包、删除 Whisper 模型、清理临时音频。
+会卸载：faster-whisper, ctranslate2, onnxruntime, huggingface-hub, tokenizers, av
+
+会删除：`~/.cache/huggingface/`（含 ~500MB 模型）、临时音频文件、项目 .db 和 output/
+
+注意：requests, pyyaml, python-dotenv, openai 是项目核心依赖，保留不卸。
+
+---
+
+## 手动清理（如果 script 失败）
+
+```bash
+# 卸包
+python3.11 -m pip uninstall --break-system-packages -y faster-whisper ctranslate2 onnxruntime huggingface-hub tokenizers av
+
+# 删模型
+rm -rf ~/.cache/huggingface/
+
+# 删临时文件
+rm -f /tmp/bilibili_asr_*.m4s /tmp/bilibili_cookie_*.txt
+
+# 删项目数据
+rm -f bilibili_sync.db bilibili_sync.log
+rm -rf output/
+```

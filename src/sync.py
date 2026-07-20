@@ -135,6 +135,7 @@ def _upsert_favorite_video(
         pub_time = pub_time // 1000
 
     record = {
+        "aid": video.get("id") or video.get("aid", 0),
         "bvid": video.get("bvid", ""),
         "title": video.get("title", ""),
         "uploader": video.get("upper", {}).get("name", ""),
@@ -165,6 +166,7 @@ def _upsert_watch_later_video(
         pub_time = pub_time // 1000
 
     record = {
+        "aid": video.get("id") or video.get("aid", 0),
         "bvid": video.get("bvid", ""),
         "title": video.get("title", ""),
         "uploader": video.get("owner", {}).get("name", ""),

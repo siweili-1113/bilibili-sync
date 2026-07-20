@@ -17,6 +17,7 @@ class BilibiliConfig:
     """B站 API 配置。"""
 
     sessdata: str = ""
+    csrf: str = ""  # bili_jct，用于 POST/WRITE 操作的 CSRF 校验
     user_agent: str = (
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
         "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
@@ -126,6 +127,7 @@ def load_config(config_path: str = "config.yaml") -> AppConfig:
         if "bilibili" in raw:
             b = raw["bilibili"]
             config.bilibili.sessdata = _env_override(b.get("sessdata", ""), "BILIBILI_SESSDATA")
+            config.bilibili.csrf = _env_override(b.get("csrf", ""), "BILIBILI_CSRF")
             config.bilibili.user_agent = b.get("user_agent", config.bilibili.user_agent)
 
         if "llm" in raw:
@@ -160,6 +162,8 @@ def load_config(config_path: str = "config.yaml") -> AppConfig:
     # 纯环境变量覆盖（即使没有 YAML）
     if not config.bilibili.sessdata:
         config.bilibili.sessdata = os.environ.get("BILIBILI_SESSDATA", "")
+    if not config.bilibili.csrf:
+        config.bilibili.csrf = os.environ.get("BILIBILI_CSRF", "")
     if not config.llm.api_key:
         config.llm.api_key = os.environ.get("LLM_API_KEY", "")
 

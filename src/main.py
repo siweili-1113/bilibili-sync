@@ -4,6 +4,7 @@
     sync      - 同步元数据（阶段0）
     process   - 下载字幕 + LLM 处理（阶段1+3+4）
     export    - 导出 Markdown（阶段5）
+    review    - 审查处理结果，决定 B站 端去留
     run       - 一键运行全部阶段
     status    - 查看处理进度
 """
@@ -11,11 +12,12 @@
 import argparse
 import logging
 import sys
+import textwrap
 
 from src.api.client import BilibiliClient
 from src.auth import AuthError, validate_cookie
 from src.config import AppConfig, load_config
-from src.database import get_stats, init_db, reset_error_videos
+from src.database import get_connection, get_stats, init_db, reset_error_videos
 from src.exporter import export_all
 from src.llm import LLMProcessor
 from src.processor import process_pending_videos
@@ -170,6 +172,73 @@ def cmd_status(args: argparse.Namespace, config: AppConfig) -> None:
     _print_summary(config)
 
 
+def cmd_review(args: argparse.Namespace, config: AppConfig) -> None:
+    """审查处理完成的稍后再看视频，决定 B站 端去留。"""
+    from src.api.actions import add_to_favorites, ensure_folder, remove_from_watch_later
+
+    init_db(config.database.path)
+
+    if not config.bilibili.csrf:
+        logger.error("未配置 BILIBILI_CSRF，无法执行写操作。请在 .env 中设置 BILIBILI_CSRF=bili_jct")
+        sys.exit(1)
+
+    # 获取待审查视频（llm_processed 或 markdown_generated 状态的稍后再看）
+    conn = get_connection(config.database.path)
+    videos = conn.execute(
+        "SELECT * FROM videos WHERE source='watch_later' AND status IN ('llm_processed','markdown_generated') ORDER BY id"
+    ).fetchall()
+
+    if not videos:
+        logger.info("没有待审查的稍后再看视频。请先运行 process 命令。")
+        return
+
+    folder_mlid = ensure_folder(config)
+    total = len(videos)
+    logger.info(f"共 {total} 个视频待审查\n")
+
+    for i, v in enumerate(videos):
+        aid = v["aid"]
+        bvid = v["bvid"]
+        title = v["title"] or bvid
+        summary = v["summary"] or ""
+        # 只展示标签和短句部分，不展示完整文本
+        summary_preview = textwrap.shorten(summary, width=300, placeholder="...")
+
+        print(f"[{i + 1}/{total}] {title}")
+        if summary_preview.strip():
+            # 缩进显示摘要
+            for line in summary_preview.split("\n"):
+                line = line.strip()
+                if line:
+                    print(f"  {line}")
+        print()
+
+        while True:
+            choice = input("  [d] 从稍后再看删除    [f] 收藏+删除    [s] 跳过    [q] 退出\n  > ").strip().lower()
+            if choice in ("d", "f", "s", "q"):
+                break
+            print("  无效输入，请选择 d/f/s/q")
+
+        if choice == "q":
+            logger.info("已退出审查")
+            break
+        elif choice == "s":
+            continue
+        elif choice == "f":
+            if add_to_favorites(config, aid, folder_mlid):
+                remove_from_watch_later(config, aid)
+                print("  ✅ 已收藏并从稍后再看删除\n")
+            else:
+                print("  ❌ 收藏失败，跳过\n")
+        elif choice == "d":
+            if remove_from_watch_later(config, aid):
+                print("  ✅ 已从稍后再看删除\n")
+            else:
+                print("  ❌ 删除失败\n")
+
+    logger.info("审查完成")
+
+
 def _print_summary(config: AppConfig) -> None:
     """打印数据库统计信息。"""
     stats = get_stats(config.database.path)
@@ -259,6 +328,9 @@ def main() -> None:
         help="重试所有 error 状态的视频",
     )
 
+    # review
+    subparsers.add_parser("review", help="审查稍后再看，决定 B站 端去留")
+
     # export
     subparsers.add_parser("export", help="导出 Markdown（阶段5）")
 
@@ -319,6 +391,7 @@ def main() -> None:
     commands = {
         "sync": cmd_sync,
         "process": cmd_process,
+        "review": cmd_review,
         "export": cmd_export,
         "run": cmd_run,
         "status": cmd_status,

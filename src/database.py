@@ -49,7 +49,7 @@ CREATE INDEX IF NOT EXISTS idx_videos_source ON videos(source);
 
 
 def init_db(db_path: str) -> None:
-    """初始化数据库：建表、创建索引。
+    """初始化数据库：建表、创建索引、迁移旧表。
 
     Args:
         db_path: SQLite 数据库文件路径
@@ -59,6 +59,11 @@ def init_db(db_path: str) -> None:
 
     with sqlite3.connect(db_path) as conn:
         conn.executescript(SCHEMA)
+        # 迁移：添加 aid 列（如果不存在）
+        cur = conn.execute("PRAGMA table_info(videos)")
+        cols = {r[1] for r in cur.fetchall()}
+        if "aid" not in cols:
+            conn.execute("ALTER TABLE videos ADD COLUMN aid INTEGER")
     logger.info(f"数据库已初始化: {db_path}")
 
 
@@ -90,6 +95,7 @@ def upsert_video(db_path: str, video: dict[str, Any]) -> bool:
         True 表示新插入，False 表示更新已有记录
     """
     fields = {
+        "aid": video.get("aid"),
         "bvid": video["bvid"],
         "title": video.get("title"),
         "uploader": video.get("uploader"),
