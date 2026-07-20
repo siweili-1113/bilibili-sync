@@ -195,18 +195,48 @@ def cmd_run(args: argparse.Namespace, config: AppConfig) -> None:
         _print_summary(config)
         return
 
-    logger.info(f"共 {total} 个新视频待处理，逐个进行...\n")
+    logger.info(f"共 {total} 个新视频待处理...\n")
     conn = get_connection(config.database.path)
     sessdata = config.bilibili.sessdata
     user_agent = config.bilibili.user_agent
     llm = LLMProcessor(config.llm)
 
+    batch_size = getattr(args, "batch", None)
+
+    # 批量模式：先一次展示 N 个标题，用户一次性选完，再批量跑
+    if batch_size and batch_size > 0:
+        batch_videos = pending[:batch_size]
+        logger.info(f"批量模式：展示 {len(batch_videos)} 个视频，请一次性输入选择（k/d/s，空格分隔）\n")
+        for j, v in enumerate(batch_videos):
+            print(f"  [{j + 1}] {v['title'] or v['bvid']}")
+        print()
+        print("  [k] 保存+收藏+删稍后再看  [d] 保存+删稍后再看  [s] 跳过")
+        print()
+
+        while True:
+            raw_input = input("  输入选择 (如: k k s d k): ").strip()
+            choices = raw_input.split()
+            if len(choices) == len(batch_videos) and all(c in ("k", "d", "s") for c in choices):
+                break
+            print(f"  需要恰好 {len(batch_videos)} 个选择 (k/d/s)，中间用空格分隔")
+
+        # 批量处理
+        for j, v in enumerate(batch_videos):
+            choice = choices[j]
+            if choice == "s":
+                update_video_status(config.database.path, v["bvid"], "no_subtitle")
+                print(f"  [{j + 1}] ⏭️ {v['title'][:50]}")
+                continue
+            print(f"\n  [{j + 1}] 处理中: {v['title'][:50]}")
+            _process_one(config, v, choice, conn, sessdata, user_agent, llm, has_csrf, folder_mlid)
+        return
+
+    # 逐个模式
     for i, video in enumerate(pending):
         bvid = video["bvid"]
         aid = video["aid"]
         title = video["title"] or bvid
 
-        # === 先让用户选，再处理 ===
         print(f"\n[{i + 1}/{total}] {title}")
 
         parts = []
@@ -215,8 +245,6 @@ def cmd_run(args: argparse.Namespace, config: AppConfig) -> None:
         if has_csrf and aid:
             parts.append("[d] 保存+删稍后再看(不收藏)")
         parts.append("[s] 跳过")
-        if not has_csrf:
-            parts.append("(无 CSRF，B站操作不可用)")
 
         print("  " + "\n  ".join(parts))
 
@@ -238,70 +266,82 @@ def cmd_run(args: argparse.Namespace, config: AppConfig) -> None:
             print("  ⏭️ 跳过")
             continue
 
-        # === 用户选了 k 或 d，开始处理 ===
-        logger.info("  🎤 正在转录语音...")
-        raw_text = ""
-        try:
-            raw_text = transcribe_video(bvid, sessdata, user_agent)
-        except Exception as e:
-            logger.error(f"  ASR 失败: {e}")
-            increment_retry(config.database.path, bvid, str(e), config.sync.max_retries)
-            continue
-
-        if len(raw_text) <= 20:
-            logger.info(f"  ⏭️ 语音内容过少 ({len(raw_text)} 字)，跳过")
-            update_video_status(config.database.path, bvid, "no_subtitle")
-            continue
-
-        logger.info(f"  ✅ 转录完成 ({len(raw_text)} 字)")
-
-        logger.info("  📝 正在用 LLM 整理文字...")
-        try:
-            cleaned, summary = llm.process(raw_text)
-            if not cleaned or not cleaned.strip():
-                cleaned = raw_text
-                summary = ""
-        except Exception as e:
-            logger.error(f"  LLM 失败: {e}")
-            cleaned = raw_text
-            summary = ""
-
-        logger.info(f"  ✅ 整理完成")
-
-        if summary.strip():
-            for line in summary.split("\n"):
-                line = line.strip()
-                if line:
-                    print(f"  {line}")
-
-        update_video_status(
-            config.database.path, bvid, "llm_processed",
-            raw_subtitle_text=raw_text,
-            cleaned_text=cleaned,
-            summary=summary,
-        )
-
-        # 导出
-        from src.exporter import export_video
-        fresh = conn.execute("SELECT * FROM videos WHERE bvid=?", (bvid,)).fetchone()
-        if fresh:
-            export_video(dict(fresh), config.output.base_dir)
-
-        if choice == "k":
-            update_video_status(config.database.path, bvid, "markdown_generated")
-            add_to_favorites(config, aid, folder_mlid)
-            remove_from_watch_later(config, aid)
-            print("  ✅ 笔记 + 收藏 + 删稍后再看")
-        elif choice == "d":
-            update_video_status(config.database.path, bvid, "markdown_generated")
-            remove_from_watch_later(config, aid)
-            print("  ✅ 笔记 + 删稍后再看")
-
-        import time
-        time.sleep(0.3)
+        _process_one(config, video, choice, conn, sessdata, user_agent, llm, has_csrf, folder_mlid)
 
     logger.info("\n全部完成！")
     _print_summary(config)
+
+
+def _process_one(config, video, choice, conn, sessdata, user_agent, llm, has_csrf, folder_mlid):
+    """处理单个视频：ASR → LLM → 导出 → B站操作。"""
+    from src.api.actions import add_to_favorites, remove_from_watch_later
+    from src.asr import transcribe_video
+    from src.database import increment_retry, update_video_status
+    from src.exporter import export_video
+
+    bvid = video["bvid"]
+    aid = video["aid"]
+    title = video["title"] or bvid
+
+    logger.info("  🎤 正在转录语音...")
+    try:
+        raw_text = transcribe_video(bvid, sessdata, user_agent)
+    except Exception as e:
+        logger.error(f"  ASR 失败: {e}")
+        increment_retry(config.database.path, bvid, str(e), config.sync.max_retries)
+        return
+
+    if len(raw_text) <= 20:
+        logger.info(f"  ⏭️ 语音内容过少 ({len(raw_text)} 字)，跳过")
+        update_video_status(config.database.path, bvid, "no_subtitle")
+        return
+
+    logger.info(f"  ✅ 转录完成 ({len(raw_text)} 字)")
+
+    logger.info("  📝 正在用 LLM 整理文字...")
+    try:
+        cleaned, summary = llm.process(raw_text)
+        if not cleaned or not cleaned.strip():
+            cleaned = raw_text
+            summary = ""
+    except Exception as e:
+        logger.error(f"  LLM 失败: {e}")
+        cleaned = raw_text
+        summary = ""
+
+    logger.info(f"  ✅ 整理完成")
+
+    if summary.strip():
+        for line in summary.split("\n"):
+            line = line.strip()
+            if line:
+                print(f"  {line}")
+
+    update_video_status(
+        config.database.path, bvid, "llm_processed",
+        raw_subtitle_text=raw_text,
+        cleaned_text=cleaned,
+        summary=summary,
+    )
+
+    fresh = conn.execute("SELECT * FROM videos WHERE bvid=?", (bvid,)).fetchone()
+    if fresh:
+        export_video(dict(fresh), config.output.base_dir)
+
+    if choice == "k":
+        update_video_status(config.database.path, bvid, "markdown_generated")
+        if has_csrf:
+            add_to_favorites(config, aid, folder_mlid)
+            remove_from_watch_later(config, aid)
+        print(f"  ✅ 笔记 + 收藏 + 删稍后再看")
+    elif choice == "d":
+        update_video_status(config.database.path, bvid, "markdown_generated")
+        if has_csrf:
+            remove_from_watch_later(config, aid)
+        print(f"  ✅ 笔记 + 删稍后再看")
+
+    import time
+    time.sleep(0.3)
 
 
 def _interactive_review(config, videos, folder_mlid, has_csrf):
@@ -556,6 +596,13 @@ def main() -> None:
         choices=["all", "favorites", "watch_later"],
         default="watch_later",
         help="同步来源（默认: watch_later）",
+    )
+    run_parser.add_argument(
+        "--batch",
+        type=int,
+        default=None,
+        metavar="N",
+        help="先展示 N 个视频一次性选 k/d/s，再批量处理",
     )
 
     # status
