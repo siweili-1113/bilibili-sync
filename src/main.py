@@ -205,62 +205,10 @@ def cmd_run(args: argparse.Namespace, config: AppConfig) -> None:
         bvid = video["bvid"]
         aid = video["aid"]
         title = video["title"] or bvid
-        duration = video["duration"] or 0
 
-        print(f"\n{'=' * 50}")
-        print(f"[{i + 1}/{total}] {title}")
-        print(f"{'=' * 50}")
+        # === 先让用户选，再处理 ===
+        print(f"\n[{i + 1}/{total}] {title}")
 
-        # ASR 转录
-        logger.info("  🎤 正在转录语音...")
-        raw_text = ""
-        try:
-            raw_text = transcribe_video(bvid, sessdata, user_agent)
-        except Exception as e:
-            logger.error(f"  ASR 失败: {e}")
-            increment_retry(config.database.path, bvid, str(e), config.sync.max_retries)
-            continue
-
-        # 低内容跳过
-        if len(raw_text) <= 20:
-            logger.info(f"  ⏭️ 语音内容过少 ({len(raw_text)} 字)，跳过")
-            update_video_status(config.database.path, bvid, "no_subtitle")
-            continue
-
-        logger.info(f"  ✅ 转录完成 ({len(raw_text)} 字)")
-
-        # LLM 整理
-        logger.info("  📝 正在用 LLM 整理文字...")
-        try:
-            cleaned, summary = llm.process(raw_text)
-            if not cleaned or not cleaned.strip():
-                logger.warning("  LLM 返回空内容，保留原始转录文本")
-                cleaned = raw_text
-                summary = ""
-        except Exception as e:
-            logger.error(f"  LLM 失败: {e}")
-            cleaned = raw_text
-            summary = ""
-
-        logger.info(f"  ✅ 整理完成")
-
-        # 展示摘要
-        if summary.strip():
-            print()
-            for line in summary.split("\n"):
-                line = line.strip()
-                if line:
-                    print(f"  {line}")
-
-        # 存库
-        update_video_status(
-            config.database.path, bvid, "llm_processed",
-            raw_subtitle_text=raw_text,
-            cleaned_text=cleaned,
-            summary=summary,
-        )
-
-        # 用户决定
         parts = []
         if has_csrf and folder_mlid and aid:
             parts.append("[k] 保存+收藏+删稍后再看")
@@ -270,7 +218,7 @@ def cmd_run(args: argparse.Namespace, config: AppConfig) -> None:
         if not has_csrf:
             parts.append("(无 CSRF，B站操作不可用)")
 
-        print("\n  " + "\n  ".join(parts))
+        print("  " + "\n  ".join(parts))
 
         valid_actions = set()
         if has_csrf and folder_mlid and aid:
@@ -285,12 +233,59 @@ def cmd_run(args: argparse.Namespace, config: AppConfig) -> None:
                 break
             print("  可选: " + "/".join(sorted(valid_actions)))
 
-        if choice in ("k", "d"):
-            from src.exporter import export_video
-            # 导出 LLM 整理后的 md
-            fresh = conn.execute("SELECT * FROM videos WHERE bvid=?", (bvid,)).fetchone()
-            if fresh:
-                export_video(dict(fresh), config.output.base_dir)
+        if choice == "s":
+            update_video_status(config.database.path, bvid, "no_subtitle")
+            print("  ⏭️ 跳过")
+            continue
+
+        # === 用户选了 k 或 d，开始处理 ===
+        logger.info("  🎤 正在转录语音...")
+        raw_text = ""
+        try:
+            raw_text = transcribe_video(bvid, sessdata, user_agent)
+        except Exception as e:
+            logger.error(f"  ASR 失败: {e}")
+            increment_retry(config.database.path, bvid, str(e), config.sync.max_retries)
+            continue
+
+        if len(raw_text) <= 20:
+            logger.info(f"  ⏭️ 语音内容过少 ({len(raw_text)} 字)，跳过")
+            update_video_status(config.database.path, bvid, "no_subtitle")
+            continue
+
+        logger.info(f"  ✅ 转录完成 ({len(raw_text)} 字)")
+
+        logger.info("  📝 正在用 LLM 整理文字...")
+        try:
+            cleaned, summary = llm.process(raw_text)
+            if not cleaned or not cleaned.strip():
+                cleaned = raw_text
+                summary = ""
+        except Exception as e:
+            logger.error(f"  LLM 失败: {e}")
+            cleaned = raw_text
+            summary = ""
+
+        logger.info(f"  ✅ 整理完成")
+
+        if summary.strip():
+            for line in summary.split("\n"):
+                line = line.strip()
+                if line:
+                    print(f"  {line}")
+
+        update_video_status(
+            config.database.path, bvid, "llm_processed",
+            raw_subtitle_text=raw_text,
+            cleaned_text=cleaned,
+            summary=summary,
+        )
+
+        # 导出
+        from src.exporter import export_video
+        fresh = conn.execute("SELECT * FROM videos WHERE bvid=?", (bvid,)).fetchone()
+        if fresh:
+            export_video(dict(fresh), config.output.base_dir)
 
         if choice == "k":
             update_video_status(config.database.path, bvid, "markdown_generated")
@@ -301,8 +296,6 @@ def cmd_run(args: argparse.Namespace, config: AppConfig) -> None:
             update_video_status(config.database.path, bvid, "markdown_generated")
             remove_from_watch_later(config, aid)
             print("  ✅ 笔记 + 删稍后再看")
-        elif choice == "s":
-            print("  ⏭️ 跳过")
 
         import time
         time.sleep(0.3)
