@@ -257,14 +257,16 @@ def cmd_run(args: argparse.Namespace, config: AppConfig) -> None:
             actions.append(("k", "保留+收藏+删稍后再看"))
         if has_csrf and aid:
             actions.append(("d", "从稍后再看删除"))
-        actions.append(("s", "跳过，保留不动"))
+        actions.append(("s", "跳过"))
 
-        prompt = "  " + "    ".join(f"[{k}] {desc}" for k, desc in actions)
+        prompt_parts = [f"[{k}] {desc}" for k, desc in actions]
+        prompt_parts.append("[n] 处理完退出")
+        prompt_parts.append("[q] 立刻退出")
+        prompt = "  " + "    ".join(prompt_parts)
         if not has_csrf:
             prompt += "\n  (未配置 CSRF，无法操作 B站。编辑 .env 添加 BILIBILI_CSRF=bili_jct)"
 
-        valid_keys = {k for k, _ in actions}
-        valid_keys.add("q")
+        valid_keys = {k for k, _ in actions} | {"n", "q"}
 
         while True:
             choice = input(f"{prompt}\n  > ").strip().lower()
@@ -273,15 +275,13 @@ def cmd_run(args: argparse.Namespace, config: AppConfig) -> None:
             print("  无效输入")
 
         if choice == "q":
-            logger.info("已退出。已处理的视频进度已保存，下次运行继续。")
+            logger.info("立刻退出，当前视频未处理。下次运行重新转录。")
             break
 
         if choice == "k":
-            # 导出 md
             from src.exporter import export_video
             export_video(dict(video), config.output.base_dir)
             update_video_status(config.database.path, bvid, "markdown_generated")
-            # B站 操作
             add_to_favorites(config, aid, folder_mlid)
             remove_from_watch_later(config, aid)
             print("  ✅ 已保存笔记 + 收藏 + 从稍后再看删除")
@@ -291,6 +291,10 @@ def cmd_run(args: argparse.Namespace, config: AppConfig) -> None:
             print("  ✅ 已从稍后再看删除")
         elif choice == "s":
             print("  ⏭️ 已跳过")
+
+        if choice == "n":
+            logger.info("处理完当前视频，退出。下次运行继续处理剩余视频。")
+            break
 
         import time
         time.sleep(0.3)
@@ -333,9 +337,11 @@ def _interactive_review(config, videos, folder_mlid, has_csrf):
             actions.append(("d", "从稍后再看删除"))
         actions.append(("s", "跳过"))
 
-        prompt = "  " + "    ".join(f"[{k}] {desc}" for k, desc in actions)
-        valid_keys = {k for k, _ in actions}
-        valid_keys.add("q")
+        prompt_parts = [f"[{k}] {desc}" for k, desc in actions]
+        prompt_parts.append("[n] 处理完退出")
+        prompt_parts.append("[q] 立刻退出")
+        prompt = "  " + "    ".join(prompt_parts)
+        valid_keys = {k for k, _ in actions} | {"n", "q"}
 
         while True:
             choice = input(f"{prompt}\n  > ").strip().lower()
@@ -359,6 +365,9 @@ def _interactive_review(config, videos, folder_mlid, has_csrf):
             print("  ✅ 已从稍后再看删除")
         elif choice == "s":
             print("  ⏭️ 跳过")
+
+        if choice == "n":
+            break
 
 
 def cmd_status(args: argparse.Namespace, config: AppConfig) -> None:

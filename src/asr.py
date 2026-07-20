@@ -105,7 +105,7 @@ def _get_audio_url(bvid: str, sessdata: str, user_agent: str) -> tuple[str, str]
 
 
 def download_audio(url: str, bvid: str, sessdata: str, user_agent: str) -> str:
-    """下载音频流到临时文件。
+    """下载音频流到临时文件。中断后自动清理半截文件。
 
     Args:
         url: 音频流 URL
@@ -125,23 +125,28 @@ def download_audio(url: str, bvid: str, sessdata: str, user_agent: str) -> str:
         "User-Agent": user_agent,
         "Referer": f"https://www.bilibili.com/video/{bvid}",
         "Cookie": f"SESSDATA={sessdata}",
-        "Range": "bytes=0-",  # 有些 CDN 需要
+        "Range": "bytes=0-",
     }
 
     logger.info(f"下载音频: {bvid}")
-    r = requests.get(url, headers=headers, stream=True, timeout=120)
-    r.raise_for_status()
+    try:
+        r = requests.get(url, headers=headers, stream=True, timeout=120)
+        r.raise_for_status()
 
-    total = 0
-    with open(output_path, "wb") as f:
-        for chunk in r.iter_content(chunk_size=8192):
-            if chunk:
-                f.write(chunk)
-                total += len(chunk)
+        with open(output_path, "wb") as f:
+            for chunk in r.iter_content(chunk_size=8192):
+                if chunk:
+                    f.write(chunk)
 
-    file_size = os.path.getsize(output_path)
-    logger.info(f"音频已下载: {output_path} ({file_size / 1024 / 1024:.1f}MB)")
-    return output_path
+        file_size = os.path.getsize(output_path)
+        logger.info(f"音频已下载: {output_path} ({file_size / 1024 / 1024:.1f}MB)")
+        return output_path
+    except Exception:
+        # 下载失败或中断，清理半截文件
+        if os.path.exists(output_path):
+            os.remove(output_path)
+            logger.info(f"已清理半截文件: {output_path}")
+        raise
 
 
 def transcribe(audio_path: str) -> str:
