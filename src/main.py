@@ -203,31 +203,39 @@ def cmd_run(args: argparse.Namespace, config: AppConfig) -> None:
 
     batch_size = getattr(args, "batch", None)
 
-    # 批量模式：先一次展示 N 个标题，用户一次性选完，再批量跑
+    # 批量模式：逐个展示标题选 k/d/s，全部选完后批量处理
     if batch_size and batch_size > 0:
         batch_videos = pending[:batch_size]
-        logger.info(f"批量模式：展示 {len(batch_videos)} 个视频，请一次性输入选择（k/d/s，空格分隔）\n")
-        for j, v in enumerate(batch_videos):
-            print(f"  [{j + 1}] {v['title'] or v['bvid']}")
-        print()
-        print("  [k] 保存+收藏+删稍后再看  [d] 保存+删稍后再看  [s] 跳过")
-        print()
+        logger.info(f"批量模式：共 {len(batch_videos)} 个，逐个选择\n")
 
-        while True:
-            raw_input = input("  输入选择 (如: k k s d k): ").strip()
-            choices = raw_input.split()
-            if len(choices) == len(batch_videos) and all(c in ("k", "d", "s") for c in choices):
-                break
-            print(f"  需要恰好 {len(batch_videos)} 个选择 (k/d/s)，中间用空格分隔")
+        choices = []
+        for j, v in enumerate(batch_videos):
+            title = v["title"] or v["bvid"]
+            print(f"  [{j + 1}/{len(batch_videos)}] {title}")
+
+            valid_actions = set()
+            if has_csrf and folder_mlid and v["aid"]:
+                valid_actions.update(["k", "d"])
+            valid_actions.add("s")
+
+            while True:
+                c = input(f"  [{'/'.join(sorted(valid_actions))}] > ").strip().lower()
+                if c in valid_actions:
+                    break
+                print(f"  可选: {'/'.join(sorted(valid_actions))}")
+
+            choices.append(c)
 
         # 批量处理
+        logger.info(f"\n选择完成，开始批量处理...")
         for j, v in enumerate(batch_videos):
             choice = choices[j]
+            title = v["title"] or v["bvid"]
             if choice == "s":
                 update_video_status(config.database.path, v["bvid"], "no_subtitle")
-                print(f"  [{j + 1}] ⏭️ {v['title'][:50]}")
+                print(f"  [{j + 1}] ⏭️ {title[:50]}")
                 continue
-            print(f"\n  [{j + 1}] 处理中: {v['title'][:50]}")
+            print(f"\n  [{j + 1}] 处理中: {title[:50]}")
             _process_one(config, v, choice, conn, sessdata, user_agent, llm, has_csrf, folder_mlid)
         return
 
