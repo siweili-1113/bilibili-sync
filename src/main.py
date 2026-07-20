@@ -555,8 +555,8 @@ def main() -> None:
     run_parser.add_argument(
         "--source",
         choices=["all", "favorites", "watch_later"],
-        default="all",
-        help="同步来源（默认: all）",
+        default="watch_later",
+        help="同步来源（默认: watch_later）",
     )
 
     # status
