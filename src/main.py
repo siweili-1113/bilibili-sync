@@ -287,22 +287,10 @@ def cmd_run(args: argparse.Namespace, config: AppConfig) -> None:
 
         if choice in ("k", "d"):
             from src.exporter import export_video
-            from pathlib import Path
-
             # 导出 LLM 整理后的 md
             fresh = conn.execute("SELECT * FROM videos WHERE bvid=?", (bvid,)).fetchone()
             if fresh:
                 export_video(dict(fresh), config.output.base_dir)
-
-            # 单独保存原始转录
-            raw_dir = Path(config.output.base_dir) / "稍后再看_raw"
-            raw_dir.mkdir(parents=True, exist_ok=True)
-            from src.utils import sanitize_filename
-            raw_title = sanitize_filename(title)
-            raw_path = raw_dir / f"{raw_title}.txt"
-            with open(raw_path, "w", encoding="utf-8") as f:
-                f.write(raw_text)
-            logger.info(f"  原始转录已保存: {raw_path}")
 
         if choice == "k":
             update_video_status(config.database.path, bvid, "markdown_generated")
@@ -369,21 +357,9 @@ def _interactive_review(config, videos, folder_mlid, has_csrf):
 
         if choice in ("k", "d"):
             from src.exporter import export_video
-            from pathlib import Path
-
             fresh = conn.execute("SELECT * FROM videos WHERE bvid=?", (bvid,)).fetchone()
             if fresh:
                 export_video(dict(fresh), config.output.base_dir)
-
-            raw_text = v["raw_subtitle_text"] or ""
-            if raw_text:
-                raw_dir = Path(config.output.base_dir) / "稍后再看_raw"
-                raw_dir.mkdir(parents=True, exist_ok=True)
-                from src.utils import sanitize_filename
-                raw_title = sanitize_filename(title)
-                raw_path = raw_dir / f"{raw_title}.txt"
-                with open(raw_path, "w", encoding="utf-8") as f:
-                    f.write(raw_text)
 
         if choice == "k":
             update_video_status(config.database.path, bvid, "markdown_generated")
