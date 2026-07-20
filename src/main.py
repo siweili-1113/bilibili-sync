@@ -180,28 +180,27 @@ def cmd_run(args: argparse.Namespace, config: AppConfig) -> None:
         except Exception as e:
             logger.warning(f"创建收藏夹失败 ({e})，将跳过 B站 写操作")
 
-    # 逐视频处理
+    # === 优先审查：上次跑完但未决定的视频 ===
+    unreviewed = get_videos_by_status(config.database.path, "llm_processed")
+    if unreviewed:
+        logger.info(f"上次有 {len(unreviewed)} 个视频已处理但未决定，先处理这些：")
+        _interactive_review(config, unreviewed, folder_mlid, has_csrf)
+
+    # === 处理新视频 ===
     pending = get_videos_by_status(config.database.path, "pending")
     total = len(pending)
 
     if total == 0:
-        # 检查是否有待审查的视频（上次中断后残留）
-        unreviewed = get_videos_by_status(config.database.path, "llm_processed")
-        if unreviewed:
-            logger.info(f"没有待处理的视频，但有 {len(unreviewed)} 个待审查的视频")
-            _interactive_review(config, unreviewed, folder_mlid, has_csrf)
-        else:
-            logger.info("没有待处理的视频。稍后再看已全部处理完毕！")
+        logger.info("没有新的视频需要处理。")
         _print_summary(config)
         return
 
-    logger.info(f"共 {total} 个视频待处理，逐个进行...\n")
+    logger.info(f"共 {total} 个新视频待处理，逐个进行...\n")
     conn = get_connection(config.database.path)
     sessdata = config.bilibili.sessdata
     user_agent = config.bilibili.user_agent
     llm = LLMProcessor(config.llm)
 
-    processed = []
     for i, video in enumerate(pending):
         bvid = video["bvid"]
         aid = video["aid"]
@@ -261,13 +260,6 @@ def cmd_run(args: argparse.Namespace, config: AppConfig) -> None:
             summary=summary,
         )
 
-        # 展示原始转录 vs 整理后（前 200 字对比）
-        print()
-        if raw_text and cleaned:
-            print(f"  📝 原始转录 ({len(raw_text)}字): {raw_text[:150]}...")
-            print(f"  ✨ 整理后   ({len(cleaned)}字): {cleaned[:150]}...")
-        print()
-
         # 用户决定
         parts = []
         if has_csrf and folder_mlid and aid:
@@ -278,58 +270,54 @@ def cmd_run(args: argparse.Namespace, config: AppConfig) -> None:
         if not has_csrf:
             parts.append("(无 CSRF，B站操作不可用)")
 
-        print("  " + "\n  ".join(parts))
-        print()
+        print("\n  " + "\n  ".join(parts))
 
         valid_actions = set()
         if has_csrf and folder_mlid and aid:
             valid_actions.add("k")
         if has_csrf and aid:
             valid_actions.add("d")
-        valid_actions.update(["s", "n", "q"])
+        valid_actions.add("s")
 
         while True:
-            choice = input("  [k/d/s] 或 [n]退出 [q]立刻退出 > ").strip().lower()
+            choice = input("\n  > ").strip().lower()
             if choice in valid_actions:
                 break
-            print("  无效输入，可选: " + "/".join(sorted(valid_actions)))
+            print("  可选: " + "/".join(sorted(valid_actions)))
 
-        if choice == "q":
-            logger.info("立刻退出，当前视频未保存。下次运行重新转录。")
-            break
-
-        # k 和 d 都导出 md
         if choice in ("k", "d"):
             from src.exporter import export_video
+            from pathlib import Path
+
+            # 导出 LLM 整理后的 md
             fresh = conn.execute("SELECT * FROM videos WHERE bvid=?", (bvid,)).fetchone()
             if fresh:
                 export_video(dict(fresh), config.output.base_dir)
 
-        if choice in ("k", "d", "s"):
-            if choice == "k":
-                update_video_status(config.database.path, bvid, "markdown_generated")
-                add_to_favorites(config, aid, folder_mlid)
-                remove_from_watch_later(config, aid)
-                print("  ✅ 笔记已保存 + 收藏 + 删稍后再看")
-            elif choice == "d":
-                update_video_status(config.database.path, bvid, "markdown_generated")
-                remove_from_watch_later(config, aid)
-                print("  ✅ 笔记已保存 + 删稍后再看")
-            elif choice == "s":
-                print("  ⏭️ 跳过")
+            # 单独保存原始转录
+            raw_dir = Path(config.output.base_dir) / "稍后再看_raw"
+            raw_dir.mkdir(parents=True, exist_ok=True)
+            from src.utils import sanitize_filename
+            raw_title = sanitize_filename(title)
+            raw_path = raw_dir / f"{raw_title}.txt"
+            with open(raw_path, "w", encoding="utf-8") as f:
+                f.write(raw_text)
+            logger.info(f"  原始转录已保存: {raw_path}")
 
-        if choice == "n":
-            logger.info("处理完毕，退出。")
-            break
+        if choice == "k":
+            update_video_status(config.database.path, bvid, "markdown_generated")
+            add_to_favorites(config, aid, folder_mlid)
+            remove_from_watch_later(config, aid)
+            print("  ✅ 笔记 + 收藏 + 删稍后再看")
+        elif choice == "d":
+            update_video_status(config.database.path, bvid, "markdown_generated")
+            remove_from_watch_later(config, aid)
+            print("  ✅ 笔记 + 删稍后再看")
+        elif choice == "s":
+            print("  ⏭️ 跳过")
 
         import time
         time.sleep(0.3)
-
-    # 检查是否有上一轮中断残留的未审查视频
-    unreviewed = get_videos_by_status(config.database.path, "llm_processed")
-    if unreviewed:
-        logger.info(f"\n还有 {len(unreviewed)} 个上次未审查的视频：")
-        _interactive_review(config, unreviewed, folder_mlid, has_csrf)
 
     logger.info("\n全部完成！")
     _print_summary(config)
@@ -371,40 +359,45 @@ def _interactive_review(config, videos, folder_mlid, has_csrf):
             valid_actions.add("k")
         if has_csrf and aid:
             valid_actions.add("d")
-        valid_actions.update(["s", "n", "q"])
+        valid_actions.add("s")
 
         while True:
-            choice = input("\n  [k/d/s] 或 [n]退出 [q]立刻退出 > ").strip().lower()
+            choice = input("\n  > ").strip().lower()
             if choice in valid_actions:
                 break
-            print("  无效输入")
+            print("  可选: " + "/".join(sorted(valid_actions)))
 
-        if choice == "q":
-            break
-
-        # k 和 d 都导出 md
         if choice in ("k", "d"):
             from src.exporter import export_video
+            from pathlib import Path
+
             fresh = conn.execute("SELECT * FROM videos WHERE bvid=?", (bvid,)).fetchone()
             if fresh:
                 export_video(dict(fresh), config.output.base_dir)
+
+            raw_text = v["raw_subtitle_text"] or ""
+            if raw_text:
+                raw_dir = Path(config.output.base_dir) / "稍后再看_raw"
+                raw_dir.mkdir(parents=True, exist_ok=True)
+                from src.utils import sanitize_filename
+                raw_title = sanitize_filename(title)
+                raw_path = raw_dir / f"{raw_title}.txt"
+                with open(raw_path, "w", encoding="utf-8") as f:
+                    f.write(raw_text)
 
         if choice == "k":
             update_video_status(config.database.path, bvid, "markdown_generated")
             if has_csrf:
                 add_to_favorites(config, aid, folder_mlid)
                 remove_from_watch_later(config, aid)
-            print("  ✅ 笔记已保存 + 收藏 + 删稍后再看")
+            print("  ✅ 笔记 + 收藏 + 删稍后再看")
         elif choice == "d":
             update_video_status(config.database.path, bvid, "markdown_generated")
             if has_csrf:
                 remove_from_watch_later(config, aid)
-            print("  ✅ 笔记已保存 + 删稍后再看")
+            print("  ✅ 笔记 + 删稍后再看")
         elif choice == "s":
             print("  ⏭️ 跳过")
-
-        if choice == "n":
-            break
 
 
 def cmd_status(args: argparse.Namespace, config: AppConfig) -> None:
