@@ -290,7 +290,10 @@ def cmd_run(args: argparse.Namespace, config: AppConfig) -> None:
 
         if choice == "k":
             from src.exporter import export_video
-            export_video(dict(video), config.output.base_dir)
+            # 从数据库重新取，确保拿到 LLM 处理后的 cleaned_text 和 summary
+            fresh = conn.execute("SELECT * FROM videos WHERE bvid=?", (bvid,)).fetchone()
+            if fresh:
+                export_video(dict(fresh), config.output.base_dir)
             update_video_status(config.database.path, bvid, "markdown_generated")
             add_to_favorites(config, aid, folder_mlid)
             remove_from_watch_later(config, aid)
@@ -362,7 +365,9 @@ def _interactive_review(config, videos, folder_mlid, has_csrf):
             break
         elif choice == "k":
             from src.exporter import export_video
-            export_video(dict(v), config.output.base_dir)
+            fresh = conn.execute("SELECT * FROM videos WHERE bvid=?", (bvid,)).fetchone()
+            if fresh:
+                export_video(dict(fresh), config.output.base_dir)
             update_video_status(config.database.path, bvid, "markdown_generated")
             if has_csrf:
                 add_to_favorites(config, aid, folder_mlid)
