@@ -156,10 +156,20 @@ def cmd_run(args: argparse.Namespace, config: AppConfig) -> None:
     logger.info("B站收藏夹/稍后再看 → 文字归档工具")
     logger.info("=" * 60)
 
-    # 阶段0: 同步元数据
+    # 阶段0: 同步元数据（默认只看稍后再看）
     logger.info("正在同步稍后再看列表...")
     init_db(config.database.path)
-    cmd_sync(args, config)
+    source = getattr(args, "source", "watch_later")
+    limit = getattr(args, "limit", None)
+    folder_ids = getattr(args, "folders", None) or config.sync.favorite_folder_ids or None
+
+    client = BilibiliClient(
+        config.bilibili,
+        rate_limit_min=config.sync.rate_limit_min,
+        rate_limit_max=config.sync.rate_limit_max,
+        max_retries=config.sync.max_retries,
+    )
+    sync_all(client, config, config.database.path, folder_ids=folder_ids, limit=limit, source=source)
 
     # 确保收藏夹存在
     has_csrf = bool(config.bilibili.csrf)
