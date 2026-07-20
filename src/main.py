@@ -196,6 +196,7 @@ def cmd_run(args: argparse.Namespace, config: AppConfig) -> None:
         return
 
     logger.info(f"共 {total} 个视频待处理，逐个进行...\n")
+    conn = get_connection(config.database.path)
     sessdata = config.bilibili.sessdata
     user_agent = config.bilibili.user_agent
     llm = LLMProcessor(config.llm)
@@ -338,7 +339,9 @@ def _interactive_review(config, videos, folder_mlid, has_csrf):
     """交互审查已处理但未决定的视频。"""
     import textwrap
     from src.api.actions import add_to_favorites, remove_from_watch_later
-    from src.database import update_video_status
+    from src.database import get_connection, update_video_status
+
+    conn = get_connection(config.database.path)
 
     total = len(videos)
     for i, v in enumerate(videos):
